@@ -1,5 +1,5 @@
 /******************************************************************
-*   Inverse Kinematics code to control a (modified) 
+*   Inverse Kinematics code to control a (modified)
 *   LynxMotion AL5D robot arm using a PS2 controller.
 *
 *   Original IK code by Oleg Mazurov:
@@ -50,10 +50,11 @@
 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 * GNU General Public License for more details.
 * <http://www.gnu.org/licenses/>
-* 
+*
 ******************************************************************/
 
-#include <Servo.h>
+/* #include <Servo.h> */
+#include<math.h>
 
 int dummy;                  // Defining this dummy variable to work around a bug in the
                             // IDE (1.0.3) pre-processor that messes up #ifdefs
@@ -62,7 +63,7 @@ int dummy;                  // Defining this dummy variable to work around a bug
                             //            http://arduino.cc/forum/index.php/topic,125769.0.html
 
 //#define DEBUG             // Uncomment to turn on debugging output
-                            
+
 //#define WRIST_ROTATE      // Uncomment if wrist rotate hardware is installed
 
 // Arm dimensions (mm). Standard AL5D arm, as measured by Johnathan and Stormy
@@ -71,19 +72,9 @@ int dummy;                  // Defining this dummy variable to work around a bug
 #define ULNA 184.5          // Elbow-to-wrist "bone"
 #define GRIPPER 72.0        // Gripper length, to middle of grip surface
 
-// Define generic range limits for servos, in microseconds (us) and degrees (deg)
-// Used to map range of 180 deg to 1800 us (native servo units).
-// Specific per-servo/joint limits are defined below
-#define SERVO_MIN_US 600
-#define SERVO_MID_US 1500
-#define SERVO_MAX_US 2400
-#define SERVO_MIN_DEG 0.0
-#define SERVO_MID_DEG 90.0
-#define SERVO_MAX_DEG 180.0
-
 // Set physical limits (in degrees) per servo/joint.
 // Will vary for each servo/joint, depending on mechanical range of motion.
-// The MID setting is the required servo input needed to achieve a 
+// The MID setting is the required servo input needed to achieve a
 // 90 degree joint angle, to allow compensation for horn misalignment
 #define BAS_MIN 0.0         // Fully CCW
 #define BAS_MID 90.0
@@ -117,7 +108,7 @@ int dummy;                  // Defining this dummy variable to work around a bug
 #define SPEED_MAX 1.5
 #define SPEED_DEFAULT 1.0
 #define SPEED_INCREMENT 0.25
- 
+
 // IK function return values
 #define IK_SUCCESS 0
 #define IK_ERROR 1          // Desired position not possible
@@ -127,7 +118,7 @@ int dummy;                  // Defining this dummy variable to work around a bug
 #define PARK_READY 2        // Arm at Ready-To-Run position
 
 // Ready-To-Run arm position. See descriptions below
-// NOTE: Have the arm near this position before turning on the 
+// NOTE: Have the arm near this position before turning on the
 //       servo power to prevent whiplash
 #define READY_X 0.0
 #define READY_Y 170.0
@@ -135,7 +126,7 @@ int dummy;                  // Defining this dummy variable to work around a bug
 #define READY_GA 0.0
 #define READY_G GRI_MID
 #ifdef  WRIST_ROTATE
- #define READY_WR WRO_MID
+#define READY_WR WRO_MID
 #endif
 
 // Global variables for arm position, and initial settings
@@ -152,27 +143,22 @@ float Speed = SPEED_DEFAULT;
 // Pre-calculations
 float hum_sq = HUMERUS*HUMERUS;
 float uln_sq = ULNA*ULNA;
- 
+
+void servo_park(int park_type);
+int set_arm(float x, float y, float z, float grip_angle_degrees);
+
 void setup()
 {
-#ifdef DEBUG
-    // insert debug function here. initial command: Serial.begin(115200);
-#endif
     // NOTE: Ensure arm is close to the desired park position before turning on servo power!
     servo_park(PARK_READY); //
-
-#ifdef DEBUG
-    Serial.println("Start");
-#endif
-
-    delay(500);
+    // delay(500);
     // Sound tone to indicate it's safe to turn on servo power ****CHANGE TO CUSTOM DEBUG****
     /*tone(SPK_PIN, TONE_READY, TONE_DURATION)
     delay(TONE_DURATION * 2);
     tone(SPK_PIN, TONE_READY, TONE_DURATION);*/
 
 }
- 
+
 void loop()
 {
     // Store desired position in tmp variables until confirmed by set_arm() logic
@@ -180,15 +166,16 @@ void loop()
     float y_tmp = Y;
     float z_tmp = Z;
     float ga_tmp = GA;
-    
+
     // Used to indidate whether an input occurred that can move the arm
-    boolean arm_move = false;
+    bool arm_move = false;
 
     /*TODO: GET COORDINATES FROM PYTHON SITE*/
     /*TODO: Possibly add speed increase/decrease*/
     /*TODO: add gripper angle as input (relative to horizontal, default 0)*/
-    
-    //TODO: THE FOLLOWING COMMENTED-OUT CODE IS FOR CARTESIAN BOUNDS CHECKING. NEEDS TO BE APPLIED TO OUR SITUATION
+
+    //TODO: THE FOLLOWING COMMENTED-OUT CODE IS FOR CARTESIAN BOUNDS
+    //CHECKING. NEEDS TO BE APPLIED TO OUR SITUATION
     /*// X Position (in mm)
     // Can be positive or negative. Servo range checking in IK code
     if (abs(rx_trans) > JS_DEADBAND) {
@@ -202,7 +189,7 @@ void loop()
         y_tmp += ((float)ry_trans / JS_IK_SCALE * Speed);
         y_tmp = max(y_tmp, Y_MIN);
         arm_move = true;
-        
+
         if (y_tmp == Y_MIN) {
             // Provide audible feedback of reaching limit
             tone(SPK_PIN, TONE_IK_ERROR, TONE_DURATION);
@@ -250,7 +237,7 @@ void loop()
         G = GRI_MIN;
         Gri_Servo.writeMicroseconds(deg_to_us(G));
     }
-    
+
     // Speed increase/decrease
     if (Ps2x.ButtonPressed(PSB_PAD_UP) || Ps2x.ButtonPressed(PSB_PAD_DOWN)) {
         if (Ps2x.ButtonPressed(PSB_PAD_UP)) {
@@ -260,11 +247,11 @@ void loop()
         }
         // Constrain to limits
         Speed = constrain(Speed, SPEED_MIN, SPEED_MAX);
-        
+
         // Audible feedback
         tone(SPK_PIN, (TONE_READY * Speed), TONE_DURATION);
     }
-    
+
 #ifdef WRIST_ROTATE
     // Wrist rotate (in degrees)
     // Restrict to MIN/MAX range of servo
@@ -283,8 +270,8 @@ void loop()
     // Only perform IK calculations if arm motion is needed.
     if (arm_move) {          // 3D kinematics
         if (set_arm(x_tmp, y_tmp, z_tmp, ga_tmp) == IK_SUCCESS) {
-            // If the arm was positioned successfully, record
-            // the new vales. Otherwise, ignore them.
+            /* If the arm was positioned successfully, record */
+            /* the new vales. Otherwise, ignore them. */
             X = x_tmp;
             Y = y_tmp;
             Z = z_tmp;
@@ -297,50 +284,58 @@ void loop()
         arm_move = false;
     }
 
-    delay(10);
+    // delay(10);
  }
- 
+
+inline double degrees(double radians) {
+    return radians * (180.0 / M_PI);
+}
+
+inline double radians(double degrees) {
+    return degrees * (M_PI / 180.0);
+}
+
 // Arm positioning routine utilizing Inverse Kinematics.
 // Z is height, Y is distance from base center out, X is side to side. Y, Z can only be positive.
 // Input dimensions are for the gripper, just short of its tip, where it grabs things.
 // If resulting arm position is physically unreachable, return error code.
-int set_arm(float x, float y, float z, float grip_angle_d)
+int set_arm(float x, float y, float z, float grip_angle_degrees)
 {
     //grip angle in radians for use in calculations
-    float grip_angle_r = radians(grip_angle_d);    
-  
+    float grip_angle_r = radians(grip_angle_degrees);
+
     // Base angle and radial distance from x,y coordinates
     float bas_angle_r = atan2(x, y);
     float rdist = sqrt((x * x) + (y * y));
-  
+
     // rdist is y coordinate for the arm
     y = rdist;
-    
+
     // Grip offsets calculated based on grip angle
     float grip_off_z = (sin(grip_angle_r)) * GRIPPER;
     float grip_off_y = (cos(grip_angle_r)) * GRIPPER;
-    
+
     // Wrist position
     float wrist_z = (z - grip_off_z) - BASE_HGT;
     float wrist_y = y - grip_off_y;
-    
+
     // Shoulder to wrist distance (AKA sw)
     float s_w = (wrist_z * wrist_z) + (wrist_y * wrist_y);
     float s_w_sqrt = sqrt(s_w);
-    
+
     // s_w angle to ground
     float a1 = atan2(wrist_z, wrist_y);
-    
+
     // s_w angle to humerus
     float a2 = acos(((hum_sq - uln_sq) + s_w) / (2 * HUMERUS * s_w_sqrt));
-    
+
     // Shoulder angle
     float shl_angle_r = a1 + a2;
     // If result is NAN or Infinity, the desired arm position is not possible
     if (isnan(shl_angle_r) || isinf(shl_angle_r))
         return IK_ERROR;
     float shl_angle_d = degrees(shl_angle_r);
-    
+
     // Elbow angle
     float elb_angle_r = acos((hum_sq + uln_sq - s_w) / (2 * HUMERUS * ULNA));
     // If result is NAN or Infinity, the desired arm position is not possible
@@ -348,21 +343,21 @@ int set_arm(float x, float y, float z, float grip_angle_d)
         return IK_ERROR;
     float elb_angle_d = degrees(elb_angle_r);
     float elb_angle_dn = -(180.0 - elb_angle_d);
-    
+
     // Wrist angle
-    float wri_angle_d = (grip_angle_d - elb_angle_dn) - shl_angle_d;
- 
+    float wri_angle_d = (grip_angle_degrees - elb_angle_dn) - shl_angle_d;
+
     // Calculate servo angles
     // Calc relative to servo midpoint to allow compensation for servo alignment
     float bas_pos = BAS_MID + degrees(bas_angle_r);
     float shl_pos = SHL_MID + (shl_angle_d - 90.0);
     float elb_pos = ELB_MID - (elb_angle_d - 90.0);
     float wri_pos = WRI_MID + wri_angle_d;
-    
+
     // If any servo ranges are exceeded, return an error
     if (bas_pos < BAS_MIN || bas_pos > BAS_MAX || shl_pos < SHL_MIN || shl_pos > SHL_MAX || elb_pos < ELB_MIN || elb_pos > ELB_MAX || wri_pos < WRI_MIN || wri_pos > WRI_MAX)
         return IK_ERROR;
-    
+
     //TODO: This block should call a function that sends microseconds to IFC
     /*Bas_Servo.writeMicroseconds(deg_to_us(bas_pos));
     Shl_Servo.writeMicroseconds(deg_to_us(shl_pos));
@@ -378,7 +373,7 @@ int set_arm(float x, float y, float z, float grip_angle_d)
     Serial.print("  Z: ");
     Serial.print(z);
     Serial.print("  GA: ");
-    Serial.print(grip_angle_d);
+    Serial.print(grip_angle_degrees);
     Serial.println();
     Serial.print("Base Pos: ");
     Serial.print(bas_pos);
@@ -389,9 +384,9 @@ int set_arm(float x, float y, float z, float grip_angle_d)
     Serial.print("  Wrst Pos: ");
     Serial.println(wri_pos);
     Serial.print("bas_angle_d: ");
-    Serial.print(degrees(bas_angle_r));  
+    Serial.print(degrees(bas_angle_r));
     Serial.print("  shl_angle_d: ");
-    Serial.print(shl_angle_d);  
+    Serial.print(shl_angle_d);
     Serial.print("  elb_angle_d: ");
     Serial.print(elb_angle_d);
     Serial.print("  wri_angle_d: ");
@@ -401,7 +396,7 @@ int set_arm(float x, float y, float z, float grip_angle_d)
 
     return IK_SUCCESS;
 }
- 
+
 // Move servos to parking position
 void servo_park(int park_type)
 {
@@ -418,41 +413,33 @@ void servo_park(int park_type)
             Wro_Servo.writeMicroseconds(deg_to_us(WRO_MID));
 #endif*/
             break;
-        
+
         // Ready-To-Run position
         case PARK_READY:
             set_arm(READY_X, READY_Y, READY_Z, READY_GA);
-            Gri_Servo.writeMicroseconds(deg_to_us(READY_G));
+            // Gri_Servo.writeMicroseconds(deg_to_us(READY_G));
 #ifdef WRIST_ROTATE
-            Wro_Servo.writeMicroseconds(deg_to_us(READY_WR));
+            // Wro_Servo.writeMicroseconds(deg_to_us(READY_WR));
 #endif
             break;
     }
-
-    return;
 }
 
 // The Arduino Servo library .write() function accepts 'int' degrees, meaning
-// maximum servo positioning resolution is whole degrees. Servos are capable 
+// maximum servo positioning resolution is whole degrees. Servos are capable
 // of roughly 2x that resolution via direct microsecond control.
 //
-// This function converts 'float' (i.e. decimal) degrees to corresponding 
+// This function converts 'float' (i.e. decimal) degrees to corresponding
 // servo microseconds to take advantage of this extra resolution.
 
-
-//TODO: This is what the LUT that Stormy and Eric created for the TM4C. May need to migrate to IFC
+// TODO: This is what the LUT that Stormy and Eric created for the TM4C. May
+// need to migrate to IFC
 /*int deg_to_us(float value)
 {
     // Apply basic constraints
     if (value < SERVO_MIN_DEG) value = SERVO_MIN_DEG;
     if (value > SERVO_MAX_DEG) value = SERVO_MAX_DEG;
-    
-    // Map degrees to microseconds, and round the result to a whole number
-    return(round(map_float(value, SERVO_MIN_DEG, SERVO_MAX_DEG, (float)SERVO_MIN_US, (float)SERVO_MAX_US)));      
-}
 
-// Same logic as native map() function, just operates on float instead of long
-float map_float(float x, float in_min, float in_max, float out_min, float out_max)
-{
-  return ((x - in_min) * (out_max - out_min) / (in_max - in_min)) + out_min;
+    // Map degrees to microseconds, and round the result to a whole number
+    return(round(map_float(value, SERVO_MIN_DEG, SERVO_MAX_DEG, (float)SERVO_MIN_US, (float)SERVO_MAX_US)));
 }*/
